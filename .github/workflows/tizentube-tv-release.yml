@@ -1,0 +1,169 @@
+name: TizenTube TV APKs
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*-tv.*']
+    paths:
+      - branding/**
+      - cobalt/shell/android/java/res/**
+      - cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+      - .github/workflows/tizentube-tv-release.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - branding/**
+      - cobalt/shell/android/java/res/**
+      - cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+      - .github/workflows/tizentube-tv-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tizentube-tv-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            branding
+            cobalt/shell/android/java/res
+            cobalt/shell/android/shell_apk
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Test branding patcher and pinned assets
+        run: python -m unittest discover -s branding/tests -v
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = json.loads(Path('branding/upstream.json').read_text())
+          if os.environ['RELEASE_TAG'] != config['release_tag']:
+              raise SystemExit('Tag must match release_tag in branding/upstream.json')
+          PY
+
+  build:
+    needs: test
+    if: github.event_name != 'pull_request' && github.repository == 'djdoolky76/TizenTube-TV'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [arm32, arm64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            branding
+            cobalt/shell/android/java/res
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android build tools
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0"'
+      - name: Download and verify pinned upstream APK
+        run: python branding/download.py --variant '${{ matrix.variant }}'
+      - name: Restore persistent signing key
+        env:
+          KEY_BASE64: ${{ secrets.TIZENTUBE_KEYSTORE_BASE64 }}
+        run: |
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          value = os.environ.get('KEY_BASE64', '')
+          if not value:
+              raise SystemExit('Missing Actions secret TIZENTUBE_KEYSTORE_BASE64')
+          key = Path(os.environ['RUNNER_TEMP']) / 'tizentube-tv.p12'
+          key.write_bytes(base64.b64decode(value, validate=True))
+          key.chmod(0o600)
+          PY
+      - name: Brand, align, sign and verify APK
+        env:
+          TIZENTUBE_KEY_PASSWORD: ${{ secrets.TIZENTUBE_KEY_PASSWORD }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          INPUT=$(python -c 'import json, os; print(json.load(open("branding/upstream.json"))["variants"][os.environ["VARIANT"]]["asset"])')
+          python branding/rebrand.py \
+            --variant "$VARIANT" \
+            --input "branding/downloads/$INPUT" \
+            --build-tools "$ANDROID_HOME/build-tools/36.0.0" \
+            --keystore "$RUNNER_TEMP/tizentube-tv.p12"
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tizentube-tv.p12"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tizentube-tv-${{ matrix.variant }}
+          path: branding/output/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    needs: [test, build]
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'djdoolky76/TizenTube-TV'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: branding
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: tizentube-tv-*
+          path: release-assets
+          merge-multiple: true
+      - name: Prepare checksums and notices
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('release-assets')
+          config = json.loads(Path('branding/upstream.json').read_text())
+          lines = []
+          for variant in ('arm32', 'arm64'):
+              apk = root / f'TizenTube-TV-{variant}.apk'
+              with apk.open('rb') as stream:
+                  digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+              report = json.loads((root / f'TizenTube-TV-{variant}.verification.json').read_text())
+              if digest != report['output_sha256'] or report['release_tag'] != config['release_tag']:
+                  raise SystemExit('Artifact digest/release mismatch')
+              lines.append(f'{digest}  {apk.name}')
+          (root / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n')
+          notice = Path('branding/NOTICE.md').read_text() + '\n\nUpstream root LICENSE:\n\n' + Path('LICENSE').read_text()
+          (root / 'TizenTube-TV-NOTICE.txt').write_text(notice)
+          PY
+      - name: Publish both verified APK variants
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite published assets.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" --verify-tag --draft \
+            --title "TizenTube TV $RELEASE_TAG" \
+            --notes-file branding/RELEASE_NOTES.md \
+            release-assets/*.apk release-assets/*.json release-assets/*.txt
+          gh release edit "$RELEASE_TAG" --draft=false --latest

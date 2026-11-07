@@ -1,0 +1,31 @@
+{
+  "repository": "reisxd/TizenTubeCobalt",
+  "upstream_tag": "v2.0.3",
+  "release_tag": "v2.0.3-tv.1",
+  "package": "io.gh.reisxd.tizentube.cobalt",
+  "version_name": "2.0.3",
+  "version_code": "203",
+  "signing_certificate_sha256": "70b748a069c25d5dfc864c2a4a22ea3f27fde899e208157d1e65beab77c87e67",
+  "variants": {
+    "arm32": {
+      "abi": "armeabi-v7a",
+      "asset": "cobalt-arm.apk",
+      "url": "https://github.com/reisxd/TizenTubeCobalt/releases/download/v2.0.3/cobalt-arm.apk",
+      "sha256": "72a3527f520db3a1b414916ad96481244e451c41e272ae33344ae5e79abb37dd"
+    },
+    "arm64": {
+      "abi": "arm64-v8a",
+      "asset": "cobalt-arm64.apk",
+      "url": "https://github.com/reisxd/TizenTubeCobalt/releases/download/v2.0.3/cobalt-arm64.apk",
+      "sha256": "4e3df211abb243cb06b06ba3676fe62c3d5b59baa47c1a0050cb180b3493e539"
+    }
+  },
+  "icon_sha256": {
+    "mdpi": "28d5591748ecf1b7cec0c34bb23666eb1816266cea305b5b2aec65ee010a1194",
+    "hdpi": "95113087d849df2e895a37efa07f6143ed71d60ad68945dc74fb37fc9ae87e6d",
+    "xhdpi": "0d3f1498ea3c4e759834739f5c6053b51b8d5d0fb3bfabff6b3681046339d7c0",
+    "xxhdpi": "53f11d9fb109c3e8d58e99e0a2881bf2332b80e43fd3d0c99623d73a6d4c01fc",
+    "xxxhdpi": "6ba6c04f5b092fbd9dc85300fc88290cb296bec0dd87d1d325c3b566dabc3f78"
+  },
+  "banner_sha256": "76f96fd846bf4c3536f3e7d38a336749fef53a22b374a999cc15f81f5232c659"
+}

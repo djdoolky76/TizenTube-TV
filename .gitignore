@@ -1,4 +1,11 @@
 /client-py/
+# Personal branding build inputs, outputs, and private signing material.
+/branding/.local/
+/branding/output/
+/branding/downloads/
+*.p12
+*.jks
+*.keystore
 *.bak
 *.code-workspace
 *.gstmp
